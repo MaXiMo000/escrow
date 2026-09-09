@@ -1,0 +1,40 @@
+[project]
+# "escrow" was already taken on PyPI, same story as every sibling in this
+# portfolio (checked, not assumed). The installed command stays the short
+# name -- python-dateutil installs `dateutil`, this installs `escrow`.
+name = "escrow-evidence"
+version = "0.1.0"
+description = "A dead-man's-switch for cron/scheduled jobs: flags silence, not just failure -- the job that stopped running weeks ago that no alert ever caught."
+requires-python = ">=3.10"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["cron", "monitoring", "dead-mans-switch", "heartbeat", "evidence", "reliability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
+# PyYAML for escrow.yaml -- the same real dependency `invariant` already
+# uses elsewhere in this portfolio for its own config file, not a new
+# convention introduced here.
+dependencies = ["PyYAML>=6.0"]
+
+urls.Homepage = "https://github.com/MaXiMo000/escrow"
+urls.Source = "https://github.com/MaXiMo000/escrow"
+urls.Issues = "https://github.com/MaXiMo000/escrow/issues"
+urls.Changelog = "https://github.com/MaXiMo000/escrow/releases"
+
+[project.scripts]
+escrow = "escrow.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["escrow*"]
