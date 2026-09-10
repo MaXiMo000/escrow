@@ -86,6 +86,11 @@ declared job is `ok`.
 
 ## What this does NOT do
 
+- **No daemon, no background process.** There is no `escrow serve` or
+  `escrow watch`. `escrow check` is one CLI invocation that reads the
+  state file and exits; *you* supply the periodic trigger -- a cron
+  entry, a systemd timer, a scheduled GitHub Actions workflow. escrow
+  never runs unless something else runs it.
 - **No email, Slack, or webhook of its own.** The exit code is the
   interface -- same convention [`receipt`](https://github.com/MaXiMo000/receipt),
   [`invariant`](https://github.com/MaXiMo000/invariant), and
@@ -104,6 +109,29 @@ declared job is `ok`.
   same instant can still lose one update. Fine for the target use --one
   job pings once per run-- not designed for high-frequency concurrent
   writes.
+
+## Compared to a hosted dead-man's-switch
+
+[healthchecks.io](https://healthchecks.io), [Cronitor](https://cronitor.io),
+and [Dead Man's Snitch](https://deadmanssnitch.com) solve the same problem
+as a real, mature, hosted service: your job pings a URL over HTTPS, and
+their infrastructure -- not yours -- watches the clock and sends email/
+Slack/SMS/PagerDuty when a ping is late. If you want alerting that works
+without you also solving alerting, and don't mind a third party knowing
+when your jobs run, one of those is very likely the better choice --
+escrow doesn't compete with that and isn't trying to.
+
+escrow's tradeoff runs the other way, matching the same "stays on your
+machine" discipline as the rest of this portfolio: `ping` and `check` never
+leave the filesystem, there's no account, no third party ever learns your
+job names or schedule, and the whole state is one JSON file you can read,
+back up, or delete yourself. The cost of that is everything a hosted
+service gives you for free: no scheduling (see "no daemon," above) and no
+notification path of its own (see above) -- you supply both, from
+infrastructure you already have. Reach for escrow specifically when a
+third-party dependency for "is my cron job still running" is the wrong
+tradeoff for what the job actually does; reach for a hosted switch
+otherwise.
 
 ## Tests
 
