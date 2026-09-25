@@ -45,70 +45,111 @@ jobs:
     interval: 8d
 ```
 
-At the end of the actual job's script, record that it ran:
+### On one machine
+
+Wrap the job, so both "it ran" and "it ran but failed" get recorded:
 
 ```bash
-escrow ping nightly-backup
+escrow run nightly-backup -- /usr/local/bin/backup.sh
 ```
 
-Separately -- on its own schedule, e.g. every 15 minutes -- check every
-declared job against what's actually been recorded:
+(`escrow run` passes the job's own exit code through, so cron and systemd
+still see the failure. `escrow ping nightly-backup` at the end of a
+script works too; `escrow ping nightly-backup --fail --exit-code 3`
+records a failure.) Then, on its own schedule, check every declared job:
 
 ```bash
-escrow check escrow.yaml
+escrow check escrow.yaml     # exit 1 if anything is overdue, failed or never seen
 ```
 
-`ping` and `check` share a small JSON state file (`escrow-state.json` by
-default, or `--state PATH`) -- `ping` writes to it, `check` reads it. They
-need to see the *same* file: the common shape is a single host (the job
-and the check both run there, e.g. two cron entries) or a shared
-filesystem mount. This is not a hosted, multi-machine service; see "What
-this does not do."
+### Across machines, CI runners, containers: `escrow serve`
 
-## Three statuses, not two
+A state file only works when the job and the check share a disk -- and a
+checker on the same box as the job dies with it. `escrow serve` runs the
+switch as a small HTTP service instead (stdlib only, one process, on a
+machine you own): jobs ping it from anywhere, and it watches the clock
+itself.
+
+```bash
+export ESCROW_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe())")
+escrow serve escrow.yaml --host 0.0.0.0 --webhook https://hooks.slack.com/services/...
+```
+
+Jobs ping it with nothing but curl:
+
+```bash
+# crontab
+0 3 * * *  /usr/local/bin/backup.sh && curl -fsS -X POST "https://escrow.example.net/ping/nightly-backup?token=$ESCROW_TOKEN"
+```
+
+or with escrow itself, which also reports failures:
+
+```bash
+escrow run nightly-backup --url https://escrow.example.net -- /usr/local/bin/backup.sh
+```
+
+A scheduled GitHub Actions workflow -- whose runner won't exist tomorrow,
+so it can never share a state file -- pings the same way:
+
+```yaml
+- run: ./generate-report.sh
+- if: always()
+  run: |
+    curl -fsS -X POST -H "Authorization: Bearer ${{ secrets.ESCROW_TOKEN }}" \
+      "https://escrow.example.net/ping/weekly-report${{ job.status != 'success' && '/fail' || '' }}"
+```
+
+Whenever a job's status changes -- goes quiet, fails, never showed up,
+recovers -- escrow POSTs one JSON alert to `--webhook`. The payload
+carries `text` (what Slack and Mattermost webhooks read) and `content`
+(Discord), plus `job`, `status`, `previous` and `detail` for anything
+else. Alerts fire on changes only, never repeatedly for the same state.
+
+| endpoint | |
+|---|---|
+| `POST /ping/<job>` | ran and succeeded |
+| `POST /ping/<job>/fail?exit_code=N` | ran and failed |
+| `GET /status` | every job's status, as JSON |
+| `GET /health` | `ok` -- the one route that needs no token |
+
+Only jobs declared in `escrow.yaml` are accepted (anything else is a 404),
+so a stray ping can't grow the state. The token is required on every
+other route and compared in constant time; `escrow serve` refuses to
+listen beyond localhost without one, since anyone who can reach the port
+could otherwise mark a dead job healthy. Put it behind your usual TLS
+reverse proxy (Caddy, nginx) when it's reachable from the internet.
+
+## Four statuses
 
 | Status | Meaning |
 |---|---|
 | `ok` | Pinged within its declared interval. |
 | `overdue` | Pinged before, but not recently enough -- **the job that used to run and stopped.** |
 | `never_seen` | Declared in `escrow.yaml`, never once recorded a ping -- **the job that never ran at all**, or a typo between the name in the config and the name in the script. |
+| `failed` | Its last run reported failure (`escrow run`, `ping --fail`, `/fail`), until the next success. |
 
 `overdue` and `never_seen` are deliberately different statuses, not one
 "bad" bucket: an operator debugs "this stopped" and "this never started"
-differently, and collapsing them would hide which one they're looking at.
-Jobs are declared in `escrow.yaml` up front, not discovered from whatever
-happens to have pinged -- a job that's only "known" because it once pinged
-would be exactly as invisible as before the first time it silently
-stopped, or if it never started.
+differently. A failure doesn't move `last_seen`, so a job that keeps
+failing also goes `overdue` on schedule. Jobs are declared in
+`escrow.yaml` up front, not discovered from whatever happens to have
+pinged -- a job that's only "known" because it once pinged would be
+exactly as invisible as before the first time it silently stopped.
 
-Exit code is `1` if anything is `overdue` or `never_seen`, `0` if every
-declared job is `ok`.
+Exit code is `1` if anything isn't `ok`.
 
 ## What this does NOT do
 
-- **No daemon, no background process.** There is no `escrow serve` or
-  `escrow watch`. `escrow check` is one CLI invocation that reads the
-  state file and exits; *you* supply the periodic trigger -- a cron
-  entry, a systemd timer, a scheduled GitHub Actions workflow. escrow
-  never runs unless something else runs it.
-- **No email, Slack, or webhook of its own.** The exit code is the
-  interface -- same convention [`receipt`](https://github.com/MaXiMo000/receipt),
-  [`invariant`](https://github.com/MaXiMo000/invariant), and
-  [`carabiner`](https://github.com/MaXiMo000/carabiner) already share.
-  Run `escrow check` as a step that fails loudly in whatever you already
-  have (a GitHub Actions job, a systemd `OnFailure=` unit, a cron entry
-  piped to your existing paging tool) rather than escrow adding its own
-  SMTP client or HTTP dependency for a notification path you may not want.
-- **Not a hosted or multi-machine service.** State is one JSON file; `ping`
-  and `check` need to see the same one. A fleet of machines all pinging a
-  shared endpoint needs a real datastore behind it, not a local file --
-  genuinely different scope, not built here.
-- **Not resilient to concurrent writers.** State is written to a temp file
-  and atomically renamed (a crash mid-write can't corrupt it), but two
-  `ping`s racing on the exact same job name on a network filesystem at the
-  same instant can still lose one update. Fine for the target use --one
-  job pings once per run-- not designed for high-frequency concurrent
-  writes.
+- **No cron expressions.** A job declares an interval ("26h"), not a
+  schedule ("03:00 on weekdays"). An interval with some slack covers most
+  real jobs; a schedule-aware check is real, addable work.
+- **One `escrow serve` is one process.** If the machine running it dies,
+  nothing alerts about *that* -- put its `/health` behind whatever uptime
+  check you already have, or run the check from somewhere else.
+- **Webhook alerts only.** No built-in email or SMS: a webhook reaches
+  Slack, Discord, Mattermost, ntfy, PagerDuty (via Events API) or your own
+  endpoint without escrow carrying an SMTP client.
+- **Not a multi-tenant service.** One config, one token, one state file.
 
 ## Compared to a hosted dead-man's-switch
 
@@ -121,17 +162,18 @@ without you also solving alerting, and don't mind a third party knowing
 when your jobs run, one of those is very likely the better choice --
 escrow doesn't compete with that and isn't trying to.
 
-escrow's tradeoff runs the other way, matching the same "stays on your
-machine" discipline as the rest of this portfolio: `ping` and `check` never
-leave the filesystem, there's no account, no third party ever learns your
-job names or schedule, and the whole state is one JSON file you can read,
-back up, or delete yourself. The cost of that is everything a hosted
-service gives you for free: no scheduling (see "no daemon," above) and no
-notification path of its own (see above) -- you supply both, from
-infrastructure you already have. Reach for escrow specifically when a
-third-party dependency for "is my cron job still running" is the wrong
-tradeoff for what the job actually does; reach for a hosted switch
-otherwise.
+escrow's tradeoff runs the other way: nothing leaves machines you own.
+There's no account, no third party ever learns your job names or
+schedule, and the whole state is one JSON file you can read, back up or
+delete. `escrow check` alone needs no server at all; `escrow serve` adds
+the watching and alerting a hosted service would give you, in one stdlib
+process, when your jobs live on more than one machine.
+
+Healthchecks.io's own open-source server can also be self-hosted, and is
+the better pick if you want its dashboard, team accounts and dozens of
+integrations -- at the cost of running a Django app and a database.
+escrow is for when a YAML file, one process and a webhook are all the
+operational weight a job's dead-man's-switch deserves.
 
 ## Tests
 
@@ -142,9 +184,10 @@ python tests/test_config.py     # escrow.yaml validation
 python tests/test_state.py      # the ping record: real files, real temp dirs
 python tests/test_check.py      # ok / overdue / never_seen classification
 python tests/test_cli.py        # the real CLI entry point, real files, real argv
+python tests/test_serve.py      # escrow serve over real HTTP, alerts to a real webhook receiver
 ```
 
-41 tests. Two exist because testing an actual misconfigured `--state`
+Two tests exist because testing an actual misconfigured `--state`
 (pointed at a directory instead of a file) found a real gap: `load_state`
 only caught `JSONDecodeError`, so `IsADirectoryError` -- also an `OSError`
 -- escaped as a raw traceback instead of the same graceful "nothing

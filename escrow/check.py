@@ -1,11 +1,11 @@
-"""Compare declared jobs against recorded pings: ok, overdue, or
-never_seen. Silence gets its own status, distinct from both -- the entire
+"""Compare declared jobs against recorded pings: ok, overdue, never_seen,
+or failed. Silence gets its own status, distinct from failure -- the entire
 reason this tool exists is that "no alert" and "everything's fine" look
 identical to anything that only watches for a failure exit code.
 """
 from __future__ import annotations
 
-OK, OVERDUE, NEVER_SEEN = "ok", "overdue", "never_seen"
+OK, OVERDUE, NEVER_SEEN, FAILED = "ok", "overdue", "never_seen", "failed"
 
 
 def _fmt(seconds: float) -> str:
@@ -23,31 +23,32 @@ def check_jobs(jobs: list[dict], state: dict, now: float) -> list[dict]:
     results = []
     for job in jobs:
         name = job["name"]
-        record = state.get(name)
+        record = state.get(name) or {}
+        last_seen = record.get("last_seen")
+        base = {"name": name, "last_seen": last_seen, "overdue_by_seconds": None}
 
-        if record is None:
-            results.append({
-                "name": name, "status": NEVER_SEEN,
-                "detail": (f"'{name}' has never pinged in -- it may have never run, "
-                           "or is pinging under a different name"),
-                "last_seen": None, "overdue_by_seconds": None,
-            })
+        if record.get("last_status") == "fail":
+            # A reported failure outranks everything else: the job did run,
+            # and it said so. Cleared by the next successful ping.
+            code = record.get("exit_code")
+            results.append({**base, "status": FAILED,
+                            "detail": (f"'{name}' last run failed"
+                                       + (f" (exit {code})" if code is not None else "")
+                                       + f", {_fmt(now - record['failed_at'])} ago")})
             continue
 
-        last_seen = record["last_seen"]
+        if last_seen is None:
+            results.append({**base, "status": NEVER_SEEN,
+                            "detail": (f"'{name}' has never pinged in -- it may have never run, "
+                                       "or is pinging under a different name")})
+            continue
+
         age = now - last_seen
         if age > job["interval_seconds"]:
-            results.append({
-                "name": name, "status": OVERDUE,
-                "detail": (f"'{name}' last pinged {_fmt(age)} ago, past its "
-                           f"{job['interval']} interval"),
-                "last_seen": last_seen,
-                "overdue_by_seconds": age - job["interval_seconds"],
-            })
+            results.append({**base, "status": OVERDUE,
+                            "detail": f"'{name}' last pinged {_fmt(age)} ago, past its {job['interval']} interval",
+                            "overdue_by_seconds": age - job["interval_seconds"]})
         else:
-            results.append({
-                "name": name, "status": OK,
-                "detail": f"'{name}' last pinged {_fmt(age)} ago, within its {job['interval']} interval",
-                "last_seen": last_seen, "overdue_by_seconds": None,
-            })
+            results.append({**base, "status": OK,
+                            "detail": f"'{name}' last pinged {_fmt(age)} ago, within its {job['interval']} interval"})
     return results
