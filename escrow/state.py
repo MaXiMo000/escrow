@@ -48,7 +48,16 @@ def save_state(path: str, state: dict) -> None:
         raise
 
 
-def record_ping(path: str, job_name: str, when: float) -> None:
+def record_ping(path: str, job_name: str, when: float, *, ok: bool = True,
+                exit_code: int | None = None) -> None:
+    """ok=True: the job ran and succeeded (last_seen moves forward).
+    ok=False: it ran and failed -- recorded without moving last_seen, so a
+    job that keeps failing still goes overdue on schedule as well."""
     state = load_state(path)
-    state[job_name] = {"last_seen": when}
+    record = state.get(job_name, {})
+    if ok:
+        record = {"last_seen": when, "last_status": "ok"}
+    else:
+        record.update({"last_status": "fail", "failed_at": when, "exit_code": exit_code})
+    state[job_name] = record
     save_state(path, state)

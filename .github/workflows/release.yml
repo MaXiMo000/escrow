@@ -23,6 +23,7 @@ jobs:
       - run: python tests/test_state.py
       - run: python tests/test_check.py
       - run: python tests/test_cli.py
+      - run: python tests/test_serve.py
 
       # The tag and the packaged version must be the same thing. Without this a
       # repo happily ships v0.2.0 built from a tree that still says 0.1.0, and
