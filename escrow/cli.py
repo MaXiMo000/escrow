@@ -99,6 +99,37 @@ def _check(args) -> int:
     return 1 if any(r["status"] != OK for r in results) else 0
 
 
+def _gha(args) -> int:
+    import datetime as dt
+    import urllib.error
+    from .gha import DISABLED, check_repo
+    try:
+        grace = dt.timedelta(seconds=parse_duration(args.grace))
+    except DurationError as exc:
+        sys.exit(f"escrow: {exc}")
+    results, failed = [], False
+    for repo in args.repos:
+        try:
+            results += [{**r, "repo": repo} for r in
+                        check_repo(repo, dt.datetime.now(dt.timezone.utc), grace)]
+        except (urllib.error.URLError, KeyError, ValueError) as exc:
+            # Could not look is its own answer, never an empty "all ok".
+            print(f"[??] {repo}: could not read its workflows ({exc}); "
+                  "set GITHUB_TOKEN for private repos or rate limits", file=sys.stderr)
+            failed = True
+    bad = [r for r in results if r["status"] != OK and not r.get("intentional")]
+    if args.json:
+        print(json.dumps(results, indent=2))
+    else:
+        tag = {**_TAG, DISABLED: "--"}
+        for r in results:
+            prefix = f"{r['repo']}: " if len(args.repos) > 1 else ""
+            print(f"[{tag[r['status']]}] {prefix}{r['detail']}")
+        print(f"\n{len(results) - len(bad)}/{len(results)} scheduled workflow(s) ok"
+              + (f", {len(bad)} need attention" if bad else ""))
+    return 1 if bad or failed else 0
+
+
 def _serve(args) -> int:
     from .server import serve
 
@@ -155,6 +186,15 @@ def main(argv: list[str] | None = None) -> int:
                          help=f"path to the state file (default: {DEFAULT_STATE})")
     check_p.add_argument("--json", action="store_true", help="print the full report as JSON")
     check_p.set_defaults(func=_check)
+
+    gha_p = sub.add_parser(
+        "gha", help="check a repo's scheduled GitHub Actions workflows are still running")
+    gha_p.add_argument("repos", nargs="+", metavar="OWNER/REPO")
+    gha_p.add_argument("--grace", default="1h",
+                       help="slack past the schedule's longest gap; GitHub starts scheduled "
+                            "runs late under load (default: 1h)")
+    gha_p.add_argument("--json", action="store_true", help="print the full report as JSON")
+    gha_p.set_defaults(func=_gha)
 
     serve_p = sub.add_parser("serve", help="accept pings over HTTP and alert a webhook on changes")
     serve_p.add_argument("config", help="escrow.yaml -- the declared jobs and intervals")
