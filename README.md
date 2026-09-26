@@ -119,7 +119,38 @@ listen beyond localhost without one, since anyone who can reach the port
 could otherwise mark a dead job healthy. Put it behind your usual TLS
 reverse proxy (Caddy, nginx) when it's reachable from the internet.
 
-## Four statuses
+## Scheduled GitHub Actions, with nothing to wire up
+
+```
+$ escrow gha pydantic/pydantic nodejs/node
+[XX] pydantic/pydantic: 'Dependencies Check (dependencies-check.yml)' ran on schedule 12h ago and failed
+[OK] nodejs/node: 'Commit Queue (commit-queue.yml)' ran on schedule 4m ago, within its 5m schedule
+[OK] nodejs/node: 'Major Release (major-release.yml)' ran on schedule 223d ago, within its 365d schedule
+[--] nodejs/node: 'Auto Start CI (auto-start-ci.yml)' is disabled manually
+...
+```
+
+(Real output, 2026-09-26, trimmed. pydantic's scheduled dependency check
+had failed on every scheduled run shown -- Sept 19, 23 and 26.)
+
+A scheduled workflow goes quiet in ways that raise nothing: GitHub
+**disables the schedule after 60 days without repository activity**,
+scheduled runs get dropped under load, a cron edit leaves one that never
+fires. `escrow gha OWNER/REPO` reads each workflow's own `cron:` lines,
+works out the longest gap they should ever leave (in UTC, over two years,
+so monthly and yearly schedules are right), and compares it with the last
+scheduled run the Actions API has on record. No ping step, no change to
+the workflow. Set `GITHUB_TOKEN` for private repositories or more than a
+few repos an hour; `--grace` (default `1h`) absorbs GitHub starting
+scheduled runs late.
+
+Across eight large repositories (django, pydantic, home-assistant, fastapi,
+vite, cpython, node, rust) it checked 41 scheduled workflows in about a
+minute. One pass also showed why silence is confirmed twice: the filtered
+runs list briefly served week-old pages for three of them, so a workflow is
+only called overdue after an unfiltered query agrees.
+
+
 
 | Status | Meaning |
 |---|---|
@@ -140,9 +171,9 @@ Exit code is `1` if anything isn't `ok`.
 
 ## What this does NOT do
 
-- **No cron expressions.** A job declares an interval ("26h"), not a
-  schedule ("03:00 on weekdays"). An interval with some slack covers most
-  real jobs; a schedule-aware check is real, addable work.
+- **No cron expressions for pinged jobs.** A pinged job declares an
+  interval ("26h"), not a schedule. `escrow gha` does read cron, because
+  there the schedule is already written down in the workflow.
 - **One `escrow serve` is one process.** If the machine running it dies,
   nothing alerts about *that* -- put its `/health` behind whatever uptime
   check you already have, or run the check from somewhere else.
@@ -185,6 +216,7 @@ python tests/test_state.py      # the ping record: real files, real temp dirs
 python tests/test_check.py      # ok / overdue / never_seen classification
 python tests/test_cli.py        # the real CLI entry point, real files, real argv
 python tests/test_serve.py      # escrow serve over real HTTP, alerts to a real webhook receiver
+python tests/test_gha.py        # cron gaps, and scheduled-workflow statuses against a fake API
 ```
 
 Two tests exist because testing an actual misconfigured `--state`

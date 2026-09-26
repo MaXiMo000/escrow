@@ -3,7 +3,7 @@
 # portfolio (checked, not assumed). The installed command stays the short
 # name -- python-dateutil installs `dateutil`, this installs `escrow`.
 name = "escrow-evidence"
-version = "0.2.0"
+version = "0.3.0"
 description = "A dead-man's-switch for cron/scheduled jobs: flags silence, not just failure -- the job that stopped running weeks ago that no alert ever caught."
 requires-python = ">=3.10"
 readme = "README.md"
