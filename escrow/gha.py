@@ -144,6 +144,14 @@ def check_repo(repo: str, now: dt.datetime, grace: dt.timedelta, get=_get) -> li
         run = (runs.get("workflow_runs") or [None])[0]
         allowed = gap + grace
         if run is None:
+            created = wf.get("created_at")
+            age = now - dt.datetime.fromisoformat(created.replace("Z", "+00:00")) if created else None
+            if age is not None and age <= allowed:
+                # Added less than one schedule ago: no run was due yet.
+                results.append({**base, "status": OK, "detail": (
+                    f"'{name}' was added {_fmt(age.total_seconds())} ago; its first scheduled "
+                    f"run is due within {_fmt((allowed - age).total_seconds())}")})
+                continue
             results.append({**base, "status": NEVER_SEEN, "detail": (
                 f"'{name}' is scheduled ({'; '.join(crons)}) but has no scheduled run on record")})
             continue
@@ -172,3 +180,24 @@ def check_repo(repo: str, now: dt.datetime, grace: dt.timedelta, get=_get) -> li
                 f"'{name}' ran on schedule {_fmt(age.total_seconds())} ago, "
                 f"within its {_fmt(gap.total_seconds())} schedule")})
     return results
+
+
+def owner_repos(owner: str, get=_get) -> list[str]:
+    """Every live repository of an organization or a user: not archived
+    (nothing runs there) and not a fork (schedules never run in forks)."""
+    import urllib.error
+    names, page = [], 1
+    try:
+        get(f"/orgs/{owner}")
+        base = f"/orgs/{owner}/repos?type=all&per_page=100"
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        base = f"/users/{owner}/repos?type=owner&per_page=100"
+    while True:
+        batch = get(f"{base}&page={page}")
+        names += [r["full_name"] for r in batch if not r.get("archived") and not r.get("fork")]
+        if len(batch) < 100:
+            return names
+        page += 1
+

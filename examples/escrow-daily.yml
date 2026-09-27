@@ -1,0 +1,24 @@
+# Copy into .github/workflows/. Every morning, checks every scheduled
+# workflow in this repository and keeps one issue (label: escrow) listing
+# the ones that went quiet -- disabled by GitHub, overdue, or failing.
+name: escrow
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  escrow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: MaXiMo000/escrow@v0.4.0   # pin a tag or a commit SHA
+        with:
+          # org: my-org      # every repo in an org -- needs a token that can read them:
+          # token: ${{ secrets.ESCROW_READ_TOKEN }}
+          grace: 1h

@@ -1,0 +1,106 @@
+name: escrow scheduled-workflow check
+description: Find scheduled GitHub Actions workflows that went quiet -- disabled, overdue, failing -- and keep one issue up to date.
+author: MaXiMo000
+
+branding:
+  icon: clock
+  color: orange
+
+inputs:
+  repos:
+    description: Space-separated OWNER/REPO list. Defaults to this repository when `org` is empty.
+    required: false
+    default: ""
+  org:
+    description: An organization or user whose live repositories are all checked.
+    required: false
+    default: ""
+  grace:
+    description: Slack past each schedule's longest gap (GitHub starts scheduled runs late).
+    required: false
+    default: 1h
+  issue:
+    description: >-
+      Keep one open issue (label `escrow`) listing what needs attention, and
+      close it when everything is ok. Needs `issues: write`.
+    required: false
+    default: "true"
+  token:
+    description: >-
+      Token for the API. The default GITHUB_TOKEN reads this repository; to
+      check other repositories or a whole org, pass a token that can read them.
+    required: false
+    default: ${{ github.token }}
+  version:
+    description: escrow-evidence version to install (a PyPI specifier); latest when empty.
+    required: false
+    default: ""
+
+  install-from:
+    description: Install from this path instead of PyPI (lets CI test the action against its own checkout).
+    required: false
+    default: ""
+
+outputs:
+  attention:
+    description: Number of scheduled workflows that need attention.
+    value: ${{ steps.check.outputs.attention }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install escrow
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        FROM: ${{ inputs.install-from }}
+      run: |
+        if [ -n "$FROM" ]; then python3 -m pip install --quiet --disable-pip-version-check "$FROM"
+        else python3 -m pip install --quiet --disable-pip-version-check "escrow-evidence${VERSION:+==$VERSION}"; fi
+
+    - name: Check scheduled workflows
+      id: check
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        REPOS: ${{ inputs.repos }}
+        ORG: ${{ inputs.org }}
+        GRACE: ${{ inputs.grace }}
+      # Inputs travel as environment variables, never interpolated into the
+      # script: a repository name is data, not shell.
+      run: |
+        set -uo pipefail
+        args=(gha --json --grace "$GRACE")
+        if [ -n "$ORG" ]; then args+=(--org "$ORG"); fi
+        if [ -n "$REPOS" ]; then read -ra list <<< "$REPOS"; args+=("${list[@]}"); fi
+        if [ -z "$ORG" ] && [ -z "$REPOS" ]; then args+=("$GITHUB_REPOSITORY"); fi
+        escrow "${args[@]}" > escrow.json || true
+        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import json
+        rows = json.load(open("escrow.json"))
+        bad = [r for r in rows if r["status"] != "ok" and not r.get("intentional")]
+        mark = {"overdue": "silent", "failed": "failing", "never_seen": "never ran", "disabled": "disabled"}
+        lines = [f"- **{r['repo']}** -- {mark.get(r['status'], r['status'])}: {r['detail']}" for r in bad]
+        body = ("escrow found scheduled workflows that went quiet:\n\n" + "\n".join(lines)
+                + f"\n\n{len(rows) - len(bad)}/{len(rows)} scheduled workflow(s) ok.") if bad else ""
+        open("escrow-issue.md", "w").write(body)
+        print(f"attention={len(bad)}")
+        PY
+        cat escrow-issue.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+    - name: Keep one issue up to date
+      if: inputs.issue == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ATTENTION: ${{ steps.check.outputs.attention }}
+      run: |
+        set -euo pipefail
+        gh label create escrow --color D93F0B --description "scheduled workflows that went quiet" 2>/dev/null || true
+        open=$(gh issue list --label escrow --state open --json number --jq '.[0].number // empty')
+        if [ "${ATTENTION:-0}" != "0" ]; then
+          if [ -n "$open" ]; then gh issue edit "$open" --body-file escrow-issue.md
+          else gh issue create --title "Scheduled workflows need attention" --label escrow --body-file escrow-issue.md; fi
+        elif [ -n "$open" ]; then
+          gh issue close "$open" --comment "Every scheduled workflow is running again."
+        fi
