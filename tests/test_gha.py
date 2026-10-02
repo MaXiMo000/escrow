@@ -39,13 +39,15 @@ class TestLongestGap(unittest.TestCase):
                 longest_gap([bad])
 
 
-def fake_api(runs, state="active", cron="0 3 * * *", unfiltered=None):
+def fake_api(runs, state="active", cron="0 3 * * *", unfiltered=None, created=None,
+             repos=None):
     def get(path, raw=False):
         if raw:
             return f"on:\n  schedule:\n    - cron: '{cron}'\n"
         if path.endswith("/workflows?per_page=100"):
             return {"workflows": [{"id": 1, "name": "Nightly", "state": state,
-                                   "path": ".github/workflows/nightly.yml"}]}
+                                   "path": ".github/workflows/nightly.yml",
+                                   "created_at": created or "2020-01-01T00:00:00Z"}]}
         if "event=schedule" in path:
             return {"workflow_runs": runs}
         return {"workflow_runs": unfiltered if unfiltered is not None else runs}
@@ -66,6 +68,29 @@ class TestCheckRepo(unittest.TestCase):
         self.assertEqual(self.status(runs=[run(3 * 24 * H)]), OVERDUE)
         self.assertEqual(self.status(runs=[run(2 * H, "failure")]), FAILED)
         self.assertEqual(self.status(runs=[]), NEVER_SEEN)
+
+    def test_a_workflow_newer_than_its_schedule_is_waiting_not_missing(self):
+        # Seen live: a weekly workflow added three days ago read as "never run".
+        fresh = (NOW - 3 * 24 * H).isoformat().replace("+00:00", "Z")
+        r = check_repo("o/r", NOW, H, get=fake_api(runs=[], cron="0 0 * * 1", created=fresh))[0]
+        self.assertEqual(r["status"], OK)
+        self.assertIn("first scheduled run is due", r["detail"])
+        stale = (NOW - 30 * 24 * H).isoformat().replace("+00:00", "Z")
+        r = check_repo("o/r", NOW, H, get=fake_api(runs=[], cron="0 0 * * 1", created=stale))[0]
+        self.assertEqual(r["status"], NEVER_SEEN)
+
+    def test_an_org_lists_live_repos_only(self):
+        from escrow.gha import owner_repos
+        pages = {1: [{"full_name": f"o/r{i}"} for i in range(100)],
+                 2: [{"full_name": "o/old", "archived": True}, {"full_name": "o/copy", "fork": True},
+                     {"full_name": "o/last"}]}
+
+        def get(path, raw=False):
+            if path == "/orgs/o":
+                return {}
+            return pages[int(path.rsplit("page=", 1)[1])]
+        names = owner_repos("o", get)
+        self.assertEqual((len(names), names[-1]), (101, "o/last"))
 
     def test_github_disabling_the_schedule_is_reported(self):
         result = check_repo("o/r", NOW, H, get=fake_api(runs=[], state="disabled_inactivity"))[0]

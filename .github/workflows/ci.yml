@@ -30,6 +30,21 @@ jobs:
       - run: python tests/test_cli.py
       - run: python tests/test_serve.py
       - run: python tests/test_gha.py
+      - run: python tests/test_k8s.py
+
+  action:
+    # The action, run for real against well-known public repositories. No
+    # issue is touched: `issue: false`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./
+        id: escrow
+        with:
+          repos: nodejs/node fastapi/fastapi
+          issue: "false"
+          install-from: .
+      - run: test -n "${{ steps.escrow.outputs.attention }}"
 
   package:
     # Build and install the distribution on every commit, not only at release --

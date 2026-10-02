@@ -144,6 +144,50 @@ the workflow. Set `GITHUB_TOKEN` for private repositories or more than a
 few repos an hour; `--grace` (default `1h`) absorbs GitHub starting
 scheduled runs late.
 
+`--org NAME` checks every live repository of an organization or user
+(archived repos and forks are skipped: schedules never run there), eight at
+a time. A workflow added less than one schedule ago reads as waiting for its
+first run, not as missing.
+
+```
+$ escrow gha --org pallets
+[XX] pallets/itsdangerous: 'Lock inactive closed issues (lock.yaml)' ran on schedule 28m ago and failed
+[--] pallets/pallets-sphinx-themes: 'Lock inactive closed issues (lock.yaml)' was disabled by GitHub after 60 days without repository activity -- its schedule no longer runs, and nothing said so
+...
+4/8 scheduled workflow(s) ok, 4 need attention
+```
+
+Run on its author's own account, it found two security scans GitHub had
+quietly disabled, and a weekly CI whose last two scheduled runs had failed:
+Docker Hub had started refusing `minio/minio` pulls, which only the
+scheduled job's S3 test touched. (That one had been fixed two days
+earlier, when a pull request's CI hit the same error -- but not because
+anything had noticed the schedule failing.)
+
+A GitHub Action runs it daily and keeps **one** issue up to date, closing
+it when everything is running again -- see `examples/escrow-daily.yml`.
+
+## Kubernetes CronJobs, with nothing to wire up
+
+```
+$ kubectl get cronjobs -A -o json | escrow k8s --from -     # or just: escrow k8s
+[XX] 'default/backup' is still being scheduled but has never succeeded -- its Jobs are failing
+[--] 'default/cleanup' is suspended
+[OK] 'default/reports' last succeeded 27s ago, within its 1m schedule
+[OK] 'default/yearly-audit' was created 1m ago; its first run is not due yet
+
+3/4 CronJob(s) ok, 1 need attention
+```
+
+(Real output, from a k3s cluster running exactly those four CronJobs.) A
+CronJob records when it was last *scheduled* and when a run last
+*succeeded*; the two drifting apart is a schedule that fires while every
+Job fails -- a bad image, a missing secret, a quota -- and nothing alerts,
+because nothing errored at the CronJob level. `escrow k8s` compares both
+against the job's own schedule (`@daily`-style aliases included), names
+suspended jobs without failing on them, and calls `kubectl` for you
+(`--context`, `-n`) or reads its JSON from `--from`.
+
 Across eight large repositories (django, pydantic, home-assistant, fastapi,
 vite, cpython, node, rust) it checked 41 scheduled workflows in about a
 minute. One pass also showed why silence is confirmed twice: the filtered
@@ -217,6 +261,7 @@ python tests/test_check.py      # ok / overdue / never_seen classification
 python tests/test_cli.py        # the real CLI entry point, real files, real argv
 python tests/test_serve.py      # escrow serve over real HTTP, alerts to a real webhook receiver
 python tests/test_gha.py        # cron gaps, and scheduled-workflow statuses against a fake API
+python tests/test_k8s.py        # CronJob statuses: ok, failing, overdue, suspended, not yet due
 ```
 
 Two tests exist because testing an actual misconfigured `--state`

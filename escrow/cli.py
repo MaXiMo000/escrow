@@ -102,32 +102,75 @@ def _check(args) -> int:
 def _gha(args) -> int:
     import datetime as dt
     import urllib.error
-    from .gha import DISABLED, check_repo
+    from .gha import check_repo
     try:
         grace = dt.timedelta(seconds=parse_duration(args.grace))
     except DurationError as exc:
         sys.exit(f"escrow: {exc}")
-    results, failed = [], False
-    for repo in args.repos:
+    from concurrent.futures import ThreadPoolExecutor
+    from .gha import owner_repos
+    repos = list(args.repos)
+    for owner in args.org:
         try:
-            results += [{**r, "repo": repo} for r in
-                        check_repo(repo, dt.datetime.now(dt.timezone.utc), grace)]
+            repos += owner_repos(owner)
         except (urllib.error.URLError, KeyError, ValueError) as exc:
-            # Could not look is its own answer, never an empty "all ok".
-            print(f"[??] {repo}: could not read its workflows ({exc}); "
-                  "set GITHUB_TOKEN for private repos or rate limits", file=sys.stderr)
-            failed = True
+            sys.exit(f"escrow: could not list {owner}'s repositories ({exc})")
+    if not repos:
+        sys.exit("escrow: name at least one OWNER/REPO or --org")
+    now = dt.datetime.now(dt.timezone.utc)
+
+    def one(repo):
+        try:
+            return [{**r, "repo": repo} for r in check_repo(repo, now, grace)], None
+        except (urllib.error.URLError, KeyError, ValueError) as exc:
+            return [], f"{repo}: could not read its workflows ({exc})"
+
+    results, failed = [], False
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for found, error in pool.map(one, repos):
+            results += found
+            if error:
+                # Could not look is its own answer, never an empty "all ok".
+                print(f"[??] {error}; set GITHUB_TOKEN for private repos or rate limits",
+                      file=sys.stderr)
+                failed = True
+    return _report_schedules(results, args, "scheduled workflow(s)",
+                             prefix=len(repos) > 1) or (1 if failed else 0)
+
+
+def _report_schedules(results, args, noun: str, prefix: bool = False) -> int:
+    from .gha import DISABLED
     bad = [r for r in results if r["status"] != OK and not r.get("intentional")]
     if args.json:
         print(json.dumps(results, indent=2))
     else:
         tag = {**_TAG, DISABLED: "--"}
         for r in results:
-            prefix = f"{r['repo']}: " if len(args.repos) > 1 else ""
-            print(f"[{tag[r['status']]}] {prefix}{r['detail']}")
-        print(f"\n{len(results) - len(bad)}/{len(results)} scheduled workflow(s) ok"
+            where = f"{r['repo']}: " if prefix and r.get("repo") else ""
+            print(f"[{tag[r['status']]}] {where}{r['detail']}")
+        print(f"\n{len(results) - len(bad)}/{len(results)} {noun} ok"
               + (f", {len(bad)} need attention" if bad else ""))
-    return 1 if bad or failed else 0
+    return 1 if bad else 0
+
+
+def _k8s(args) -> int:
+    import datetime as dt
+    from .k8s import check_cronjobs, kubectl_cronjobs
+    try:
+        grace = dt.timedelta(seconds=parse_duration(args.grace))
+    except DurationError as exc:
+        sys.exit(f"escrow: {exc}")
+    try:
+        if args.from_file:
+            text = sys.stdin.read() if args.from_file == "-" else open(args.from_file, encoding="utf-8").read()
+            listing = json.loads(text)
+        else:
+            listing = kubectl_cronjobs(args.context, args.namespace)
+    except (OSError, ValueError, RuntimeError) as exc:
+        # Could not look is its own answer, never an empty "all ok".
+        sys.exit(f"escrow: could not read the CronJobs: {exc}")
+    return _report_schedules(check_cronjobs(listing, dt.datetime.now(dt.timezone.utc), grace),
+                             args, "CronJob(s)")
 
 
 def _serve(args) -> int:
@@ -189,12 +232,23 @@ def main(argv: list[str] | None = None) -> int:
 
     gha_p = sub.add_parser(
         "gha", help="check a repo's scheduled GitHub Actions workflows are still running")
-    gha_p.add_argument("repos", nargs="+", metavar="OWNER/REPO")
+    gha_p.add_argument("repos", nargs="*", metavar="OWNER/REPO")
+    gha_p.add_argument("--org", action="append", default=[], metavar="OWNER",
+                       help="every live repository of this organization or user (repeatable)")
     gha_p.add_argument("--grace", default="1h",
                        help="slack past the schedule's longest gap; GitHub starts scheduled "
                             "runs late under load (default: 1h)")
     gha_p.add_argument("--json", action="store_true", help="print the full report as JSON")
     gha_p.set_defaults(func=_gha)
+
+    k8s_p = sub.add_parser("k8s", help="check Kubernetes CronJobs are still succeeding on schedule")
+    k8s_p.add_argument("--context", help="kubectl context (default: the current one)")
+    k8s_p.add_argument("--namespace", "-n", help="one namespace (default: all)")
+    k8s_p.add_argument("--from", dest="from_file", metavar="FILE",
+                       help="read `kubectl get cronjobs -A -o json` output from FILE ('-' for stdin)")
+    k8s_p.add_argument("--grace", default="1h", help="slack past each schedule's longest gap")
+    k8s_p.add_argument("--json", action="store_true")
+    k8s_p.set_defaults(func=_k8s)
 
     serve_p = sub.add_parser("serve", help="accept pings over HTTP and alert a webhook on changes")
     serve_p.add_argument("config", help="escrow.yaml -- the declared jobs and intervals")
