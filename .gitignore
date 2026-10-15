@@ -4,3 +4,13 @@ dist/
 build/
 *.egg-info/
 .venv/
+
+# Local-only material: notes, plans, assistant config, secrets
+.dev/
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.env
+.env.*
+!.env.example
+.DS_Store

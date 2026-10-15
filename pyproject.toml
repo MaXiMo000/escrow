@@ -1,6 +1,5 @@
 [project]
-# "escrow" was already taken on PyPI, same story as every sibling in this
-# portfolio (checked, not assumed). The installed command stays the short
+# "escrow" was already taken on PyPI. The installed command stays the short
 # name -- python-dateutil installs `dateutil`, this installs `escrow`.
 name = "escrow-evidence"
 version = "0.4.0"
@@ -19,9 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: System :: Monitoring",
 ]
-# PyYAML for escrow.yaml -- the same real dependency `invariant` already
-# uses elsewhere in this portfolio for its own config file, not a new
-# convention introduced here.
+# PyYAML for escrow.yaml.
 dependencies = ["PyYAML>=6.0"]
 
 urls.Homepage = "https://github.com/MaXiMo000/escrow"

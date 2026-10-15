@@ -1,9 +1,12 @@
 # escrow
 
 [![ci](https://github.com/MaXiMo000/escrow/actions/workflows/ci.yml/badge.svg)](https://github.com/MaXiMo000/escrow/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/escrow-evidence)](https://pypi.org/project/escrow-evidence/)
 
 **A dead-man's-switch for cron jobs, GitHub Actions schedules, and systemd
 timers: flags silence, not just failure.**
+
+<p align="center"><img src="https://raw.githubusercontent.com/MaXiMo000/escrow/main/docs/demo.svg" alt="escrow checking three jobs, then flagging a nightly backup that silently stopped pinging" width="100%"></p>
 
 A scheduled job that throws an exception gets logged, maybe alerted on.
 One that silently *stops running* — a cron entry removed by a bad deploy,
@@ -30,8 +33,8 @@ at all.)
 pip install escrow-evidence   # the command it installs is `escrow`
 ```
 
-(`escrow` was already taken on PyPI -- same story as every sibling in this
-portfolio.)
+(`escrow` was already taken on PyPI, so the package is `escrow-evidence`; the command
+is still `escrow`.)
 
 ## Use
 
