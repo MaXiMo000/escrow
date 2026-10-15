@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-10-16
+
+- Documentation: a demo of real output at the top of the README, a security policy, a changelog, and issue templates.
+
 ## 0.4.0 - 2026-10-02
 
 - `escrow gha --org` scans every repository of an organization or user.

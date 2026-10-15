@@ -17,7 +17,7 @@ jobs:
   escrow:
     runs-on: ubuntu-latest
     steps:
-      - uses: MaXiMo000/escrow@v0.4.0   # pin a tag or a commit SHA
+      - uses: MaXiMo000/escrow@v0.4.1   # pin a tag or a commit SHA
         with:
           # org: my-org      # every repo in an org -- needs a token that can read them:
           # token: ${{ secrets.ESCROW_READ_TOKEN }}
