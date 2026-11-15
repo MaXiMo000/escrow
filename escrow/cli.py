@@ -28,16 +28,18 @@ _TAG = {OK: "OK", OVERDUE: "!!", NEVER_SEEN: "??", FAILED: "XX"}
 def _record(args, job: str, ok: bool, exit_code: int | None) -> None:
     """Locally into --state, or to a remote `escrow serve` via --url."""
     if args.url:
+        if not args.url.startswith(("https://", "http://")):
+            raise SystemExit(f"escrow: --url must be http(s), got {args.url!r}")
         path = f"/ping/{urllib.parse.quote(job, safe='')}" + ("" if ok else "/fail")
         if not ok and exit_code is not None:
             path += f"?exit_code={exit_code}"
-        req = urllib.request.Request(args.url.rstrip("/") + path, method="POST", data=b"",
+        req = urllib.request.Request(args.url.rstrip("/") + path, method="POST", data=b"",  # noqa: S310 - scheme checked above
                                      headers={"User-Agent": "escrow"})
         token = args.token or os.environ.get("ESCROW_TOKEN")
         if token:
             req.add_header("Authorization", f"Bearer {token}")
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
                 resp.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace").strip()

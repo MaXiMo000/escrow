@@ -11,6 +11,7 @@ the workflow itself.
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import json
 import os
 import urllib.error
@@ -90,7 +91,7 @@ def longest_gap(crons: list[str]) -> dt.timedelta:
     times = sorted({t for c in crons for t in fire_times(c, start, 731)})
     if len(times) < 2:
         raise CronError(f"{crons} fires fewer than twice in two years")
-    return max(b - a for a, b in zip(times, times[1:]))
+    return max(b - a for a, b in itertools.pairwise(times))
 
 
 def _get(path: str, raw: bool = False):
@@ -99,7 +100,7 @@ def _get(path: str, raw: bool = False):
                "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "escrow"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    with urllib.request.urlopen(urllib.request.Request(API + path, headers=headers), timeout=30) as r:
+    with urllib.request.urlopen(urllib.request.Request(API + path, headers=headers), timeout=30) as r:  # noqa: S310 - fixed https API
         body = r.read().decode("utf-8")
     return body if raw else json.loads(body)
 
