@@ -38,9 +38,11 @@ def send_alert(webhook: str, result: dict, previous: str | None) -> None:
     body = json.dumps({"text": text, "content": text, "job": result["name"],
                        "status": result["status"], "previous": previous,
                        "detail": result["detail"]}).encode()
-    req = urllib.request.Request(webhook, data=body, method="POST",
+    if not webhook.startswith(("https://", "http://")):
+        raise ValueError(f"webhook must be http(s), got {webhook!r}")
+    req = urllib.request.Request(webhook, data=body, method="POST",  # noqa: S310 - scheme checked above
                                  headers={"Content-Type": "application/json", "User-Agent": "escrow"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
         resp.read()
 
 
