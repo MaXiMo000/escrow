@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-11-18
 
 - `schedule:` for pinged jobs: a five-field cron line, with `grace` (default 1h) and `timezone` (default UTC). A job is overdue when its latest scheduled run plus the grace passes without a ping.
 
