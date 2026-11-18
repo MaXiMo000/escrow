@@ -5,6 +5,10 @@ identical to anything that only watches for a failure exit code.
 """
 from __future__ import annotations
 
+import datetime as dt
+
+from .cron import previous_fire
+
 OK, OVERDUE, NEVER_SEEN, FAILED = "ok", "overdue", "never_seen", "failed"
 
 
@@ -17,6 +21,21 @@ def _fmt(seconds: float) -> str:
     if seconds < 86400:
         return f"{seconds // 3600}h"
     return f"{seconds // 86400}d"
+
+
+def _on_schedule(job: dict, last_seen: float, age: float, now: float) -> dict:
+    """Overdue when the latest scheduled run that is past its grace period
+    has no ping at or after it. A job that only runs on weekdays is then
+    quiet on a weekend without being late."""
+    cutoff = dt.datetime.fromtimestamp(now - job["grace_seconds"], dt.timezone.utc)
+    due = previous_fire(job["schedule"], cutoff, job["tz"])
+    if due is not None and last_seen < due.timestamp():
+        return {"status": OVERDUE,
+                "detail": (f"'{job['name']}' missed its run due {due:%Y-%m-%d %H:%M} {job['timezone']} "
+                           f"({job['schedule']}, {job['grace']} grace); last pinged {_fmt(age)} ago"),
+                "overdue_by_seconds": now - due.timestamp() - job["grace_seconds"]}
+    return {"status": OK,
+            "detail": f"'{job['name']}' last pinged {_fmt(age)} ago, on schedule ({job['schedule']})"}
 
 
 def check_jobs(jobs: list[dict], state: dict, now: float) -> list[dict]:
@@ -44,6 +63,9 @@ def check_jobs(jobs: list[dict], state: dict, now: float) -> list[dict]:
             continue
 
         age = now - last_seen
+        if "schedule" in job:
+            results.append({**base, **_on_schedule(job, last_seen, age, now)})
+            continue
         if age > job["interval_seconds"]:
             results.append({**base, "status": OVERDUE,
                             "detail": f"'{name}' last pinged {_fmt(age)} ago, past its {job['interval']} interval",

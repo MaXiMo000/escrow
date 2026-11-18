@@ -41,6 +41,7 @@ jobs:
       - run: python tests/test_serve.py
       - run: python tests/test_gha.py
       - run: python tests/test_k8s.py
+      - run: python tests/test_schedule.py
 
   action:
     # The action, run for real against well-known public repositories. No

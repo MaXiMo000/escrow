@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     run_p.set_defaults(func=_run)
 
     check_p = sub.add_parser("check", help="check every declared job against its recorded pings")
-    check_p.add_argument("config", help="escrow.yaml -- the declared jobs and intervals")
+    check_p.add_argument("config", help="escrow.yaml -- the declared jobs and their intervals or schedules")
     check_p.add_argument("--state", default=DEFAULT_STATE,
                          help=f"path to the state file (default: {DEFAULT_STATE})")
     check_p.add_argument("--json", action="store_true", help="print the full report as JSON")
@@ -253,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     k8s_p.set_defaults(func=_k8s)
 
     serve_p = sub.add_parser("serve", help="accept pings over HTTP and alert a webhook on changes")
-    serve_p.add_argument("config", help="escrow.yaml -- the declared jobs and intervals")
+    serve_p.add_argument("config", help="escrow.yaml -- the declared jobs and their intervals or schedules")
     serve_p.add_argument("--state", default=DEFAULT_STATE,
                          help=f"path to the state file (default: {DEFAULT_STATE})")
     serve_p.add_argument("--host", default="127.0.0.1", help="interface to bind (default: 127.0.0.1)")
