@@ -57,6 +57,30 @@ jobs:
           install-from: .
       - run: test -n "${{ steps.escrow.outputs.attention }}"
 
+  image:
+    # The container a self-hoster runs: built and driven on every change.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: docker build -t escrow:ci .
+      - name: Refuses to listen without a token
+        run: |
+          set -euo pipefail
+          printf "jobs:\n  - name: backup\n    interval: 1h\n" > /tmp/escrow.yaml
+          if docker run --rm -v /tmp/escrow.yaml:/config/escrow.yaml:ro escrow:ci; then
+            echo "started on 0.0.0.0 with no token"; exit 1
+          fi
+      - name: Runs as non-root, gates the page, records a ping
+        run: |
+          set -euo pipefail
+          docker run -d --name escrow-ci -p 8765:8765 -e ESCROW_TOKEN=t \
+            -v /tmp/escrow.yaml:/config/escrow.yaml:ro escrow:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8765/health && break; sleep 1; done
+          test "$(docker exec escrow-ci id -u)" = 10001
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8765/)" = 401
+          curl -fsS -X POST "localhost:8765/ping/backup?token=t"
+          curl -fsS "localhost:8765/?token=t" | grep -q "1/1 ok"
+
   package:
     # Build and install the distribution on every commit, not only at release --
     # a packaging break (missing package data, wrong entry point, PyYAML not

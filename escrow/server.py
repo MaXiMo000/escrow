@@ -18,6 +18,7 @@ hostile ping can't grow the state file. With a token set, every route but
 from __future__ import annotations
 
 import hmac
+import html
 import http.server
 import json
 import sys
@@ -26,7 +27,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from .check import OK, check_jobs
+from .check import FAILED, NEVER_SEEN, OK, OVERDUE, check_jobs
 from .state import load_state, record_ping
 
 
@@ -94,6 +95,43 @@ class Watcher:
             stop.wait(every)
 
 
+_LABEL = {OK: "ok", OVERDUE: "overdue", FAILED: "failed", NEVER_SEEN: "never seen"}
+
+# Text only: nothing runs, nothing loads from elsewhere, no other site can frame
+# it, and the token in the URL is never sent on as a referrer.
+_PAGE_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+}
+
+
+def status_page(results: list[dict]) -> str:
+    """Every declared job, worst first. Refreshes itself once a minute."""
+    order = {FAILED: 0, OVERDUE: 1, NEVER_SEEN: 2, OK: 3}
+    rows = "".join(
+        f"<tr class='{r['status']}'><td>{html.escape(r['name'])}</td>"
+        f"<td><b>{_LABEL.get(r['status'], r['status'])}</b></td>"
+        f"<td>{html.escape(r['detail'])}</td></tr>"
+        for r in sorted(results, key=lambda r: (order.get(r["status"], 9), r["name"])))
+    bad = sum(1 for r in results if r["status"] != OK)
+    summary = f"{len(results) - bad}/{len(results)} ok" + (f", {bad} need attention" if bad else "")
+    return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=refresh content=60>
+<title>escrow: {html.escape(summary)}</title><style>
+:root{{color-scheme:light dark;--bg:#f7f6f2;--ink:#1b1b19;--muted:#5f5d57;--rule:#e2dfd6;--ok:#2f6b3a;--bad:#a32d2d;--warn:#8a6a12}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#141413;--ink:#ebe8df;--muted:#a29f95;--rule:#2e2d2a;--ok:#7fc28c;--bad:#ef9a9a;--warn:#e3c46b}}}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}}
+main{{max-width:60rem;margin:0 auto;padding:2rem 1rem}}h1{{font-size:1.4rem;margin:0 0 .3rem}}
+p{{color:var(--muted);margin:0 0 1.2rem}}table{{width:100%;border-collapse:collapse}}
+td{{padding:.55rem .5rem;border-top:1px solid var(--rule);vertical-align:top;overflow-wrap:anywhere}}
+td:first-child{{font-family:ui-monospace,monospace;white-space:nowrap}}
+.ok b{{color:var(--ok)}}.failed b,.overdue b{{color:var(--bad)}}.never_seen b{{color:var(--warn)}}
+</style></head><body><main><h1>escrow</h1><p>{html.escape(summary)}. Refreshes every minute.</p>
+<table>{rows}</table></main></body></html>"""
+
+
 def make_handler(watcher: Watcher, token: str | None):
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "escrow"
@@ -123,6 +161,16 @@ def make_handler(watcher: Watcher, token: str | None):
                 return self._reply(401, {"error": "missing or wrong token"})
             if parts == ["status"]:
                 return self._reply(200, watcher.results())
+            if parts == [] and self.command == "GET":
+                data = status_page(watcher.results()).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                for name, value in _PAGE_HEADERS.items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return None
             if len(parts) in (2, 3) and parts[0] == "ping" and (len(parts) == 2 or parts[2] == "fail"):
                 name = parts[1]
                 if name not in watcher.names:

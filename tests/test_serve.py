@@ -134,6 +134,32 @@ class TestHttp(Base):
         self.assertEqual(self._get(f"{base}/ping/backup?token=s3cret")[0], 200)
         self.assertEqual(self._get(f"{base}/status", {"Authorization": "Bearer s3cret"})[0], 200)
 
+    def _page(self, url):
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                return r.status, dict(r.headers), r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers), e.read().decode()
+
+    def test_status_page_needs_the_token_and_lists_worst_first(self):
+        base = self._server(token="s3cret")
+        self.assertEqual(self._page(f"{base}/")[0], 401)
+        self._get(f"{base}/ping/backup?token=s3cret")
+        status, headers, page = self._page(f"{base}/?token=s3cret")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("1/2 ok, 1 need attention", page)
+        self.assertLess(page.index(">report<"), page.index(">backup<"))  # never seen before ok
+        self.assertNotIn("<script", page)
+
+    def test_status_page_escapes_what_it_shows(self):
+        from escrow.server import status_page
+        page = status_page([{"name": "<b>x</b>", "status": OK, "detail": "a & b"}])
+        self.assertIn("&lt;b&gt;x&lt;/b&gt;", page)
+        self.assertIn("a &amp; b", page)
+
     def test_cli_ping_and_run_against_the_server(self):
         base = self._server(token="t")
         quiet = contextlib.redirect_stdout(io.StringIO())
