@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-11-18
 
 - `escrow serve` has a status page at `/`: every job, worst first, refreshing once a minute, token-gated, no scripts.
 - A container image for `escrow serve` (non-root, state on a volume, health check), published to `ghcr.io/maximo000/escrow` on release.
