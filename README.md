@@ -113,6 +113,23 @@ or with escrow itself, which also reports failures:
 escrow run nightly-backup --url https://escrow.example.net -- /usr/local/bin/backup.sh
 ```
 
+Open `https://escrow.example.net/?token=...` in a browser for a status
+page: every job, worst first, refreshing itself once a minute. It runs no
+script and loads nothing from anywhere. `/status` returns the same as JSON,
+and `/health` (no token) is for your uptime check.
+
+In a container, with the config mounted read-only and the state on a volume
+so a restart doesn't forget when each job last pinged:
+
+```bash
+docker run -d -p 8765:8765 -e ESCROW_TOKEN=... \
+  -v ./escrow.yaml:/config/escrow.yaml:ro -v escrow-state:/data \
+  ghcr.io/maximo000/escrow --webhook https://hooks.slack.com/services/...
+```
+
+It runs as a non-root user and refuses to start without `ESCROW_TOKEN`,
+since it listens beyond localhost.
+
 A scheduled GitHub Actions workflow -- whose runner won't exist tomorrow,
 so it can never share a state file -- pings the same way:
 
