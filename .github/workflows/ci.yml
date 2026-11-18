@@ -73,10 +73,10 @@ jobs:
       - name: Runs as non-root, gates the page, records a ping
         run: |
           set -euo pipefail
-          docker run -d --name e -p 8765:8765 -e ESCROW_TOKEN=t \
+          docker run -d --name escrow-ci -p 8765:8765 -e ESCROW_TOKEN=t \
             -v /tmp/escrow.yaml:/config/escrow.yaml:ro escrow:ci
           for i in $(seq 1 30); do curl -fsS localhost:8765/health && break; sleep 1; done
-          test "$(docker exec e id -u)" = 10001
+          test "$(docker exec escrow-ci id -u)" = 10001
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8765/)" = 401
           curl -fsS -X POST "localhost:8765/ping/backup?token=t"
           curl -fsS "localhost:8765/?token=t" | grep -q "1/1 ok"
