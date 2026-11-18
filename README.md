@@ -48,6 +48,28 @@ jobs:
     interval: 8d
 ```
 
+Or give the job's own cron line, so escrow knows exactly when each run is
+due:
+
+```yaml
+  - name: invoice-export
+    schedule: "0 2 * * 1-5"    # 02:00 on weekdays
+    grace: 45m                 # how long a run may take to ping (default 1h)
+    timezone: Europe/Berlin    # the zone the job's cron runs in (default UTC)
+```
+
+A scheduled job is overdue when its latest run, plus the grace, has passed
+with no ping at or after it:
+
+```
+[!!] 'nightly-backup' missed its run due 2026-11-18 01:00 UTC (0 1 * * *, 30m grace); last pinged 1d ago
+```
+
+So a weekday job is quiet all weekend without alerting, and a missed Monday
+run is flagged an hour after 02:00 rather than a day later, which an
+interval can't do. Five-field cron, with ranges, steps, lists and names
+(`mon-fri`, `jan`).
+
 ### On one machine
 
 Wrap the job, so both "it ran" and "it ran but failed" get recorded:
@@ -218,9 +240,6 @@ Exit code is `1` if anything isn't `ok`.
 
 ## What this does NOT do
 
-- **No cron expressions for pinged jobs.** A pinged job declares an
-  interval ("26h"), not a schedule. `escrow gha` does read cron, because
-  there the schedule is already written down in the workflow.
 - **One `escrow serve` is one process.** If the machine running it dies,
   nothing alerts about *that* -- put its `/health` behind whatever uptime
   check you already have, or run the check from somewhere else.

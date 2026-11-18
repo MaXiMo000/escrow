@@ -19,7 +19,8 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 # PyYAML for escrow.yaml.
-dependencies = ["PyYAML>=6.0"]
+# tzdata: IANA zone names for `timezone:` on Windows, which ships none.
+dependencies = ["PyYAML>=6.0", "tzdata; sys_platform == 'win32'"]
 
 urls.Homepage = "https://github.com/MaXiMo000/escrow"
 urls.Source = "https://github.com/MaXiMo000/escrow"

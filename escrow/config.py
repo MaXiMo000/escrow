@@ -10,9 +10,17 @@ database state, applied here to "did this job show up at all."
 """
 from __future__ import annotations
 
+import datetime as dt
+import zoneinfo
+
 import yaml
 
+from .cron import CronError, previous_fire
 from .duration import DurationError, parse_duration
+
+# How long after a scheduled time a job may take to ping before it counts
+# as missed, when `grace` isn't given.
+DEFAULT_GRACE = "1h"
 
 
 class ConfigError(ValueError):
@@ -46,17 +54,28 @@ def load_config(path: str) -> list[dict]:
             raise ConfigError(f"{path}: duplicate job name '{name}'")
         seen.add(name)
 
-        interval = job.get("interval")
-        if not interval:
-            raise ConfigError(f"{path}: job '{name}' is missing 'interval'")
+        interval, schedule = job.get("interval"), job.get("schedule")
+        if bool(interval) == bool(schedule):
+            raise ConfigError(f"{path}: job '{name}' needs exactly one of 'interval' or 'schedule'")
         try:
-            interval_seconds = parse_duration(str(interval))
-        except DurationError as exc:
+            if interval:
+                parsed.append({"name": name, "interval": str(interval),
+                               "interval_seconds": parse_duration(str(interval))})
+            else:
+                parsed.append(_scheduled(name, str(schedule), job))
+        except (DurationError, CronError) as exc:
             raise ConfigError(f"{path}: job '{name}': {exc}") from exc
-
-        parsed.append({
-            "name": name,
-            "interval": str(interval),
-            "interval_seconds": interval_seconds,
-        })
+        except zoneinfo.ZoneInfoNotFoundError:
+            raise ConfigError(f"{path}: job '{name}': unknown timezone {job.get('timezone')!r} "
+                              "(an IANA name like Europe/Berlin; on Windows, `pip install tzdata`)") from None
     return parsed
+
+
+def _scheduled(name: str, schedule: str, job: dict) -> dict:
+    grace = str(job.get("grace") or DEFAULT_GRACE)
+    zone = str(job.get("timezone") or "UTC")
+    tz = dt.timezone.utc if zone == "UTC" else zoneinfo.ZoneInfo(zone)
+    if previous_fire(schedule, dt.datetime.now(dt.timezone.utc), tz) is None:
+        raise CronError(f"{schedule!r} never fires")
+    return {"name": name, "schedule": schedule, "grace": grace,
+            "grace_seconds": parse_duration(grace), "timezone": zone, "tz": tz}
